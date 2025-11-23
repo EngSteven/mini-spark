@@ -1,0 +1,15 @@
+services:
+  master:
+    build:
+      context: ..
+      dockerfile: Dockerfile.master
+    ports:
+      - "8080:8080"
+
+  worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile.worker
+    scale: 3
+    depends_on:
+      - master

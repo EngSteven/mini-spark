@@ -1,0 +1,11 @@
+FROM golang:1.22
+
+WORKDIR /app
+
+# Se copia todo el proyecto, incluyendo go.mod y go.sum
+COPY . .
+
+# Compilar el master
+RUN go build -o master ./cmd/master
+
+CMD ["./master"]
