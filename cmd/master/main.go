@@ -11,9 +11,12 @@ import (
 
 func main() {
     registry := core.NewWorkerRegistry()
-    masterAPI := api.NewMasterAPI(registry)
+    jobManager := core.NewJobManager()
 
-    // Rutina que detecta workers DOWN
+    masterAPI := api.NewMasterAPI(registry)
+    jobAPI := api.NewJobAPI(jobManager)
+
+    // detecta workers DOWN
     go func() {
         for {
             registry.DetectDown(5 * time.Second)
@@ -21,11 +24,8 @@ func main() {
         }
     }()
 
-    server := &http.Server{
-        Addr:    ":8080",
-        Handler: masterAPI.Router(),
-    }
+    router := api.BuildRouter(masterAPI, jobAPI)
 
     log.Println("Master listening on :8080")
-    log.Fatal(server.ListenAndServe())
+    log.Fatal(http.ListenAndServe(":8080", router))
 }

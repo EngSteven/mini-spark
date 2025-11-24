@@ -2,13 +2,18 @@ package api
 
 import "net/http"
 
-func (api *MasterAPI) Router() http.Handler {
+func BuildRouter(mapi *MasterAPI, japi *JobAPI) http.Handler {
     mux := http.NewServeMux()
 
-    mux.HandleFunc("/register", api.RegisterWorker)
-    mux.HandleFunc("/heartbeat", api.Heartbeat)
-		mux.HandleFunc("/workers", api.ListWorkers)
+    // workers
+    mux.HandleFunc("/register", mapi.RegisterWorker)
+    mux.HandleFunc("/heartbeat", mapi.Heartbeat)
+    mux.HandleFunc("/workers", mapi.ListWorkers)
 
+    // jobs
+    mux.HandleFunc("POST /api/v1/jobs", japi.SubmitJob)
+    mux.HandleFunc("GET /api/v1/jobs", japi.ListJobs)
+    mux.HandleFunc("GET /api/v1/jobs/{id}", japi.GetJob)
 
     return mux
 }
