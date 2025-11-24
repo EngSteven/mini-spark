@@ -1,17 +1,31 @@
 package main
 
 import (
-	"fmt"
-	"log"
-	"net/http"
+    "log"
+    "net/http"
+    "time"
+
+    "batchdag/internal/api"
+    "batchdag/internal/core"
 )
 
 func main() {
-	fmt.Println("Master node running...")
+    registry := core.NewWorkerRegistry()
+    masterAPI := api.NewMasterAPI(registry)
 
-	http.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("pong from master"))
-	})
+    // Rutina que detecta workers DOWN
+    go func() {
+        for {
+            registry.DetectDown(5 * time.Second)
+            time.Sleep(2 * time.Second)
+        }
+    }()
 
-	log.Fatal(http.ListenAndServe(":8080", nil))
+    server := &http.Server{
+        Addr:    ":8080",
+        Handler: masterAPI.Router(),
+    }
+
+    log.Println("Master listening on :8080")
+    log.Fatal(server.ListenAndServe())
 }

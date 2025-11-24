@@ -1,3 +1,5 @@
+version: "3.8"
+
 services:
   master:
     build:
@@ -5,11 +7,37 @@ services:
       dockerfile: Dockerfile.master
     ports:
       - "8080:8080"
+    container_name: master
 
-  worker:
+  worker1:
     build:
       context: ..
       dockerfile: Dockerfile.worker
-    scale: 3
+    environment:
+      WORKER_ID: "w1"
+      WORKER_HOST: "worker1"
+      MASTER_URL: "http://master:8080"
+    depends_on:
+      - master
+
+  worker2:
+    build:
+      context: ..
+      dockerfile: Dockerfile.worker
+    environment:
+      WORKER_ID: "w2"
+      WORKER_HOST: "worker2"
+      MASTER_URL: "http://master:8080"
+    depends_on:
+      - master
+
+  worker3:
+    build:
+      context: ..
+      dockerfile: Dockerfile.worker
+    environment:
+      WORKER_ID: "w3"
+      WORKER_HOST: "worker3"
+      MASTER_URL: "http://master:8080"
     depends_on:
       - master

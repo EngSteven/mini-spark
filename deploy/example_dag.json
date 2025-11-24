@@ -1,0 +1,29 @@
+{
+  "stages": [
+    {
+      "id": "read",
+      "op": "read_csv",
+      "params": { "path": "data/*.csv" },
+      "partitions": 4,
+      "dependencies": []
+    },
+    {
+      "id": "tokenize",
+      "op": "flat_map",
+      "params": { "fn": "tokenize" },
+      "dependencies": ["read"]
+    },
+    {
+      "id": "tolower",
+      "op": "map",
+      "params": { "fn": "to_lower" },
+      "dependencies": ["tokenize"]
+    },
+    {
+      "id": "count",
+      "op": "reduce_by_key",
+      "params": { "key": "token", "fn": "sum" },
+      "dependencies": ["tolower"]
+    }
+  ]
+}
