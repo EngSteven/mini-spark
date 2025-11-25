@@ -27,32 +27,43 @@ func generateJobID() string {
 }
 
 func (api *JobAPI) SubmitJob(w http.ResponseWriter, r *http.Request) {
-    body, err := io.ReadAll(r.Body)
-    if err != nil {
-        http.Error(w, "invalid body", http.StatusBadRequest)
-        return
-    }
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
 
-    // cargar y validar DAG
-    d, err := dag.LoadFromBytes(body)
-    if err != nil {
-        http.Error(w, "invalid dag: "+err.Error(), http.StatusBadRequest)
-        return
-    }
+	// cargar y validar DAG
+	d, err := dag.LoadFromBytes(body)
+	if err != nil {
+		http.Error(w, "invalid dag: "+err.Error(), http.StatusBadRequest)
+		return
+	}
 
-    // crear Job
-    job := &core.Job{
-        ID:        generateJobID(),
-        DAG:       d,
-        State:     core.JobAccepted,
-        CreatedAt: time.Now(),
-    }
+	// crear Job
+	job := &core.Job{
+		ID:        generateJobID(),
+		DAG:       d,
+		State:     core.JobAccepted,
+		CreatedAt: time.Now(),
+		Tasks:     make(map[string]*core.JobTask),
+	}
 
-    api.Jobs.Add(job)
+	api.Jobs.Add(job)
 
-    json.NewEncoder(w).Encode(map[string]string{
-        "jobId": job.ID,
-    })
+	// Build tasks (assignments) for source stages
+	assignments := api.Jobs.BuildTasks(job)
+
+	// Enqueue assignments through the callback if provided
+	for _, a := range assignments {
+		if api.Jobs.EnqueueFn != nil {
+			api.Jobs.EnqueueFn(a)
+		}
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{
+		"jobId": job.ID,
+	})
 }
 
 func (api *JobAPI) GetJob(w http.ResponseWriter, r *http.Request) {

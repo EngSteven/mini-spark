@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -17,26 +18,29 @@ const (
 )
 
 type Job struct {
-	ID        string             `json:"id"`
-	DAG       *dag.DAG           `json:"dag"`
-	State     JobState           `json:"state"`
-	CreatedAt time.Time          `json:"created_at"`
+	ID        string              `json:"id"`
+	DAG       *dag.DAG            `json:"dag"`
+	State     JobState            `json:"state"`
+	CreatedAt time.Time           `json:"created_at"`
 	Tasks     map[string]*JobTask `json:"tasks"`
-	Progress  float32            `json:"progress"`
+	Progress  float32             `json:"progress"`
 }
 
 type JobTask struct {
-	ID        string `json:"id"`
-	StageID   string `json:"stage_id"`
-	Partition int    `json:"partition"`
-	Status    string `json:"status"`
-	Attempts  int    `json:"attempts"`
-	AssignedTo string `json:"assigned_to,omitempty"`
+	ID         string        `json:"id"`
+	StageID    string        `json:"stage_id"`
+	Partition  int           `json:"partition"`
+	Status     string        `json:"status"`
+	Attempts   int           `json:"attempts"`
+	AssignedTo string        `json:"assigned_to,omitempty"`
+	Result     []interface{} `json:"result,omitempty"`
 }
 
 type JobManager struct {
-	jobs map[string]*Job
-	mu   sync.RWMutex
+	jobs      map[string]*Job
+	mu        sync.RWMutex
+	// EnqueueFn será suministrada externamente (por main) para encolar TaskAssignments en el scheduler.
+	EnqueueFn func(a *TaskAssignment)
 }
 
 func NewJobManager() *JobManager {
@@ -110,4 +114,60 @@ func (m *JobManager) UpdateTask(jobID, taskID string, update func(t *JobTask)) {
 	if done == total {
 		j.State = JobSuccess
 	}
+}
+
+// BuildTasks crea TaskAssignment para las etapas fuente (sin dependencias)
+// y registra las JobTask en el JobManager. Devuelve la lista de assignments
+// para que el scheduler los encole (vía EnqueueFn).
+func (m *JobManager) BuildTasks(job *Job) []*TaskAssignment {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var out []*TaskAssignment
+
+	for _, st := range job.DAG.Stages {
+		// fuente = sin dependencias
+		if len(st.Dependencies) != 0 {
+			continue
+		}
+
+		parts := st.Partitions
+		if parts <= 0 {
+			parts = 1
+		}
+
+		for p := 0; p < parts; p++ {
+			tid := fmt.Sprintf("%s-%s-p%d", job.ID, st.ID, p)
+
+			// registrar tarea en JobManager
+			t := &JobTask{
+				ID:        tid,
+				StageID:   st.ID,
+				Partition: p,
+				Status:    "PENDING",
+				Attempts:  0,
+			}
+			if job.Tasks == nil {
+				job.Tasks = make(map[string]*JobTask)
+			}
+			job.Tasks[tid] = t
+
+			// crear assignment neutro (sin importar scheduler)
+			a := &TaskAssignment{
+				JobID:     job.ID,
+				TaskID:    tid,
+				StageID:   st.ID,
+				Partition: p,
+				Attempts:  0,
+				Op:        st.Op,
+				Params:    st.Params,
+			}
+			out = append(out, a)
+		}
+	}
+
+	// marcar job corriendo
+	job.State = JobRunning
+
+	return out
 }

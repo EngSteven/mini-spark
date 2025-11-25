@@ -5,11 +5,13 @@ import (
 )
 
 type TaskSpec struct {
-	JobID     string `json:"job_id"`
-	TaskID    string `json:"task_id"`
-	StageID   string `json:"stage_id"`
-	Partition int    `json:"partition"`
-	Attempts  int    `json:"attempts"`
+	JobID     string                 `json:"job_id"`
+	TaskID    string                 `json:"task_id"`
+	StageID   string                 `json:"stage_id"`
+	Partition int                    `json:"partition"`
+	Attempts  int                    `json:"attempts"`
+	Op        string                 `json:"op,omitempty"`
+	Params    map[string]interface{} `json:"params,omitempty"`
 }
 
 type TaskQueue struct {

@@ -1,0 +1,13 @@
+{
+  "stages": [
+    {
+      "id": "read",
+      "op": "read_csv",
+      "partitions": 2,
+      "params": {
+        "path": "deploy/data/sample.csv"
+      },
+      "dependencies": []
+    }
+  ]
+}

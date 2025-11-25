@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"sort"
@@ -28,7 +29,7 @@ func NewScheduler(reg *core.WorkerRegistry, jm *core.JobManager, q *TaskQueue) *
 		registry:    reg,
 		jm:          jm,
 		queue:       q,
-		client:      &http.Client{Timeout: 5 * time.Second},
+		client:      &http.Client{Timeout: 10 * time.Second},
 		activeTasks: make(map[string]int),
 		maxAttempts: 3,
 	}
@@ -82,16 +83,20 @@ func (s *Scheduler) pickWorker() *core.WorkerInfo {
 }
 
 type workerTaskPayload struct {
-	JobID     string `json:"job_id"`
-	TaskID    string `json:"task_id"`
-	StageID   string `json:"stage_id"`
-	Partition int    `json:"partition"`
+	JobID     string                 `json:"job_id"`
+	TaskID    string                 `json:"task_id"`
+	StageID   string                 `json:"stage_id"`
+	Partition int                    `json:"partition"`
+	Op        string                 `json:"op,omitempty"`
+	Params    map[string]interface{} `json:"params,omitempty"`
 }
 
 func (s *Scheduler) dispatchTask(worker *core.WorkerInfo, t *TaskSpec) {
 	defer func() {
 		s.mu.Lock()
-		s.activeTasks[worker.ID]--
+		if s.activeTasks[worker.ID] > 0 {
+			s.activeTasks[worker.ID]--
+		}
 		s.mu.Unlock()
 	}()
 
@@ -100,6 +105,8 @@ func (s *Scheduler) dispatchTask(worker *core.WorkerInfo, t *TaskSpec) {
 		TaskID:    t.TaskID,
 		StageID:   t.StageID,
 		Partition: t.Partition,
+		Op:        t.Op,
+		Params:    t.Params,
 	}
 	b, _ := json.Marshal(payload)
 
@@ -108,29 +115,74 @@ func (s *Scheduler) dispatchTask(worker *core.WorkerInfo, t *TaskSpec) {
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := s.client.Do(req)
+	if err != nil {
+		log.Printf("Task %s failed on %s: err=%v\n", t.TaskID, worker.ID, err)
+		s.handleFailure(worker, t)
+		return
+	}
+	defer resp.Body.Close()
 
-	if err != nil || resp.StatusCode >= 400 {
-		log.Printf("Task %s failed on %s (attempt %d)", t.TaskID, worker.ID, t.Attempts)
+	body, _ := io.ReadAll(resp.Body)
 
-		t.Attempts++
-		s.jm.UpdateTask(t.JobID, t.TaskID, func(jt *core.JobTask) {
-			jt.Status = "FAILED"
-			jt.Attempts = t.Attempts
-			jt.AssignedTo = worker.ID
-		})
-
-		if t.Attempts < s.maxAttempts {
-			log.Println("Retrying", t.TaskID)
-			time.Sleep(300 * time.Millisecond)
-			s.queue.Push(t)
-		}
+	if resp.StatusCode >= 400 {
+		log.Printf("Task %s failed on %s: status=%d body=%s\n", t.TaskID, worker.ID, resp.StatusCode, string(body))
+		s.handleFailure(worker, t)
 		return
 	}
 
-	s.jm.UpdateTask(t.JobID, t.TaskID, func(jt *core.JobTask) {
-		jt.Status = "DONE"
-		jt.AssignedTo = worker.ID
-	})
+	// parse possible output: {"status":"ok","output":[...]}
+	var parsed struct {
+		Status string        `json:"status"`
+		Output []interface{} `json:"output,omitempty"`
+	}
+	_ = json.Unmarshal(body, &parsed)
 
-	log.Printf("Task %s DONE on %s", t.TaskID, worker.ID)
+	// save results into job manager (store raw JSON-serializable output)
+	if len(parsed.Output) > 0 {
+		s.jm.UpdateTask(t.JobID, t.TaskID, func(jt *core.JobTask) {
+			// store outputs as a slice of interface{} (marshal later if needed)
+			jt.Result = parsed.Output
+			jt.Status = "DONE"
+			jt.AssignedTo = worker.ID
+		})
+	} else {
+		s.jm.UpdateTask(t.JobID, t.TaskID, func(jt *core.JobTask) {
+			jt.Status = "DONE"
+			jt.AssignedTo = worker.ID
+		})
+	}
+
+	log.Printf("Task %s completed on worker %s\n", t.TaskID, worker.ID)
+}
+
+func (s *Scheduler) handleFailure(worker *core.WorkerInfo, t *TaskSpec) {
+	t.Attempts++
+	s.jm.UpdateTask(t.JobID, t.TaskID, func(jt *core.JobTask) {
+		jt.Attempts = t.Attempts
+		jt.AssignedTo = worker.ID
+		jt.Status = "FAILED"
+	})
+	if t.Attempts < s.maxAttempts {
+		time.Sleep(300 * time.Millisecond)
+		s.queue.Push(t)
+	} else {
+		// permanent fail - keep status FAILED
+	}
+}
+
+// EnqueueAssignment convierte un core.TaskAssignment en TaskSpec y lo encola.
+func (s *Scheduler) EnqueueAssignment(a *core.TaskAssignment) {
+	if a == nil {
+		return
+	}
+	ts := &TaskSpec{
+		JobID:     a.JobID,
+		TaskID:    a.TaskID,
+		StageID:   a.StageID,
+		Partition: a.Partition,
+		Attempts:  a.Attempts,
+		Op:        a.Op,
+		Params:    a.Params,
+	}
+	s.queue.Push(ts)
 }
