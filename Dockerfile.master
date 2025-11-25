@@ -1,11 +1,20 @@
-FROM golang:1.22
+FROM golang:1.22 AS build
 
 WORKDIR /app
 
-# Se copia todo el proyecto, incluyendo go.mod y go.sum
+COPY go.mod ./
+RUN go mod download
+
 COPY . .
 
-# Compilar el master
-RUN go build -o master ./cmd/master
+RUN CGO_ENABLED=0 GOOS=linux go build -o master ./cmd/master
+
+FROM alpine:3.19
+
+WORKDIR /app
+
+COPY --from=build /app/master .
+
+EXPOSE 8080
 
 CMD ["./master"]

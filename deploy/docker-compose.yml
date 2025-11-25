@@ -1,43 +1,57 @@
-version: "3.8"
-
 services:
+
   master:
     build:
       context: ..
       dockerfile: Dockerfile.master
+    container_name: master
     ports:
       - "8080:8080"
-    container_name: master
+    environment:
+      MASTER_HOST: "http://master:8080"
+    networks:
+      - minispark
 
   worker1:
     build:
       context: ..
       dockerfile: Dockerfile.worker
+    container_name: worker1
     environment:
       WORKER_ID: "w1"
-      WORKER_HOST: "worker1"
+      WORKER_HOST: "http://worker1:8081"
       MASTER_URL: "http://master:8080"
-    depends_on:
-      - master
+      WORKER_HTTP_PORT: "8081"
+    networks:
+      - minispark
 
   worker2:
     build:
       context: ..
       dockerfile: Dockerfile.worker
+    container_name: worker2
     environment:
       WORKER_ID: "w2"
-      WORKER_HOST: "worker2"
+      WORKER_HOST: "http://worker2:8081"
       MASTER_URL: "http://master:8080"
-    depends_on:
-      - master
+      WORKER_HTTP_PORT: "8081"
+    networks:
+      - minispark
 
   worker3:
     build:
       context: ..
       dockerfile: Dockerfile.worker
+    container_name: worker3
     environment:
       WORKER_ID: "w3"
-      WORKER_HOST: "worker3"
+      WORKER_HOST: "http://worker3:8081"
       MASTER_URL: "http://master:8080"
-    depends_on:
-      - master
+      WORKER_HTTP_PORT: "8081"
+    networks:
+      - minispark
+
+
+networks:
+  minispark:
+    driver: bridge

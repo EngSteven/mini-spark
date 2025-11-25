@@ -1,51 +1,84 @@
 package main
 
 import (
-    "bytes"
-    "encoding/json"
-    "log"
-    "net/http"
-    "os"
-    "time"
+	"bytes"
+	"encoding/json"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"strconv"
+	"time"
 )
 
 type RegisterReq struct {
-    ID   string `json:"id"`
-    Host string `json:"host"`
+	ID   string `json:"id"`
+	Host string `json:"host"`
 }
 
 type HBReq struct {
-    ID string `json:"id"`
+	ID string `json:"id"`
+}
+
+type WorkerTaskReq struct {
+	JobID     string `json:"job_id"`
+	TaskID    string `json:"task_id"`
+	StageID   string `json:"stage_id"`
+	Partition int    `json:"partition"`
 }
 
 func main() {
-    workerID := os.Getenv("WORKER_ID")
-    host := os.Getenv("WORKER_HOST")
-    master := os.Getenv("MASTER_URL") // http://master:8080
 
-    log.Println("Worker starting:", workerID)
+	workerID := os.Getenv("WORKER_ID")
+	workerHost := os.Getenv("WORKER_HOST")
+	master := os.Getenv("MASTER_URL")
+	port := os.Getenv("WORKER_HTTP_PORT")
+	if port == "" { port = "8081" }
 
-    // 1. Registro inicial
-    reg := RegisterReq{ID: workerID, Host: host}
-    sendJSON(master+"/register", reg)
+	// Register
+    log.Println("Registering worker", workerID, "at", master+"/register")
+	sendJSON(master+"/register", RegisterReq{ID: workerID, Host: workerHost})
 
-    // 2. Heartbeat cada 2s
-    go func() {
-        for {
-            hb := HBReq{ID: workerID}
-            sendJSON(master+"/heartbeat", hb)
-            time.Sleep(2 * time.Second)
-        }
-    }()
+	// Heartbeat
+	go func() {
+		for {
+            log.Println("sending heartbeat...", workerID)
+			sendJSON(master+"/heartbeat", HBReq{ID: workerID})
+			time.Sleep(2 * time.Second)
+		}
+	}()
 
-    // Simulación de un worker vivo
-    select {}
+	// Worker task endpoint
+	http.HandleFunc("/task", taskHandler)
+
+	log.Println("Worker", workerID, "listening on port", port)
+	log.Fatal(http.ListenAndServe(":"+port, nil))
+}
+
+func taskHandler(w http.ResponseWriter, r *http.Request) {
+	var req WorkerTaskReq
+	body, _ := io.ReadAll(r.Body)
+	json.Unmarshal(body, &req)
+
+	log.Printf("Worker executing task %s (stage=%s partition=%d)\n",
+		req.TaskID, req.StageID, req.Partition)
+
+	// Simulación de trabajo
+	time.Sleep(500 * time.Millisecond)
+
+	// Simular fallo opcional
+	fail := os.Getenv("WORKER_FAIL_PARTITION")
+	if fail != "" {
+		if pi, _ := strconv.Atoi(fail); pi == req.Partition {
+			http.Error(w, "simulated error", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	w.Write([]byte(`{"status":"ok"}`))
 }
 
 func sendJSON(url string, data interface{}) {
-    b, _ := json.Marshal(data)
-    _, err := http.Post(url, "application/json", bytes.NewBuffer(b))
-    if err != nil {
-        log.Println("Error sending JSON:", err)
-    }
+	b, _ := json.Marshal(data)
+	http.Post(url, "application/json", bytes.NewBuffer(b))
 }
